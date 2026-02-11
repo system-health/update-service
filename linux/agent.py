@@ -433,7 +433,7 @@ def register_device(config, device_id):
     }
     if not exists:
         data["device_name"] = get_device_name()
-        data["registered"] = datetime.now(timezone.utc).isoformat()
+        # data["registered"] = datetime.now(timezone.utc).isoformat()  # Removed as it's not in DB schema
         api_request(config, "devices", "POST", data)
     else:
         api_request(config, f"devices?device_id=eq.{device_id}", "PATCH", {"last_sync": datetime.now(timezone.utc).isoformat()})
