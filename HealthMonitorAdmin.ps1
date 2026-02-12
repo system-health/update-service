@@ -20,9 +20,17 @@ try {
 
 $basePath = "C:\ProgramData\SystemHealthService"
 
-# Wait for internet connection
-while (!(Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet)) {
-    Start-Sleep 5
+# Force TLS 1.2 for Supabase HTTPS connections
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Wait for internet - use HTTP check instead of ICMP (ping may be blocked)
+while ($true) {
+    try {
+        $null = Invoke-RestMethod -Uri "https://www.google.com" -Method Head -TimeoutSec 5
+        break
+    } catch {
+        Start-Sleep 5
+    }
 }
 Start-Sleep 5
 

